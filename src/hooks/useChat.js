@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { sendChatMessage } from '../api/apiService';
+
 import toast from 'react-hot-toast';
 
 const STORAGE_KEY = 'iss-dashboard-chat';
@@ -73,7 +73,21 @@ export function useChat(dashboardContext) {
 
       try {
         const prompt = buildPrompt(userText, dashboardContext);
-        const reply = await sendChatMessage(prompt);
+        
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${import.meta.env.VITE_AI_TOKEN}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "mistralai/mistral-7b-instruct",
+            messages: [{ role: "user", content: prompt }]
+          })
+        });
+        
+        const data = await response.json();
+        const reply = data.choices[0].message.content;
 
         const botMsg = {
           role: 'bot',
