@@ -1,60 +1,44 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 
-const haversine = (lat1, lon1, lat2, lon2) => {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
+// ─── HTTPS endpoints — safe for Vercel production ────────────────────────────
+const ISS_API      = "https://api.wheretheiss.at/v1/satellites/25544";
+const ASTROS_API   = "https://corquaid.github.io/international-space-station-APIs/JSON/people-in-space.json";
 
+// wheretheiss.at returns velocity in km/h directly — no Haversine needed.
 export const useISS = () => {
-  const [issData, setIssData] = useState(null);
-  const [positions, setPositions] = useState([]);
-  const [speed, setSpeed] = useState(0);
+  const [issData,      setIssData]      = useState(null);
+  const [positions,    setPositions]    = useState([]);
+  const [speed,        setSpeed]        = useState(0);
   const [speedHistory, setSpeedHistory] = useState([]);
-  const [astronauts, setAstronauts] = useState({ number: 0, people: [] });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const lastPosition = useRef(null);
-  const lastTime = useRef(null);
+  const [astronauts,   setAstronauts]   = useState({ number: 0, people: [] });
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState(null);
 
   const fetchISS = async () => {
     try {
-      const res = await axios.get("http://api.open-notify.org/iss-now.json");
-      const { latitude, longitude } = res.data.iss_position;
-      const lat = parseFloat(latitude);
-      const lon = parseFloat(longitude);
-      const now = Date.now();
+      // wheretheiss.at response: { latitude, longitude, altitude, velocity, timestamp, ... }
+      const res = await axios.get(ISS_API);
+      const { latitude: lat, longitude: lon, velocity, timestamp } = res.data;
+      const now = timestamp ? timestamp * 1000 : Date.now();
 
-      let calculatedSpeed = 0;
-      if (lastPosition.current && lastTime.current) {
-        const dist = haversine(lastPosition.current.lat, lastPosition.current.lon, lat, lon);
-        const timeHours = (now - lastTime.current) / 3600000;
-        calculatedSpeed = timeHours > 0 ? dist / timeHours : 27600;
-      } else {
-        calculatedSpeed = 27600;
-      }
+      // velocity is already km/h — no manual speed calculation required
+      const kmh = Math.round(velocity);
 
-      lastPosition.current = { lat, lon };
-      lastTime.current = now;
-
-      setSpeed(Math.round(calculatedSpeed));
+      setSpeed(kmh);
       setIssData({ lat, lon, timestamp: now });
-      setPositions((prev) => [...prev.slice(-14), { lat, lon }]);
-      setSpeedHistory((prev) => [
+
+      setPositions(prev => [...prev.slice(-14), { lat, lon }]);
+
+      setSpeedHistory(prev => [
         ...prev.slice(-29),
-        { time: new Date(now).toLocaleTimeString(), speed: Math.round(calculatedSpeed) },
+        { time: new Date(now).toLocaleTimeString(), speed: kmh },
       ]);
+
       setError(null);
       setLoading(false);
     } catch (err) {
+      console.error("ISS fetch error:", err);
       setError("Failed to fetch ISS data");
       setLoading(false);
     }
@@ -62,19 +46,39 @@ export const useISS = () => {
 
   const fetchAstronauts = async () => {
     try {
-      const res = await axios.get("http://api.open-notify.org/astros.json");
-      setAstronauts({ number: res.data.number, people: res.data.people });
+      // corquaid API response shape: { number: N, people: [{ name, biopic, ... }] }
+      const res = await axios.get(ASTROS_API);
+      const data = res.data;
+
+      // Normalise — the corquaid API puts ISS crew in data directly or nested
+      const people = Array.isArray(data.people)
+        ? data.people.map(p => ({ name: p.name, craft: p.craft || "ISS" }))
+        : [];
+
+      setAstronauts({ number: people.length, people });
     } catch (err) {
-      console.error("Astronaut fetch failed");
+      console.error("Astronaut fetch failed:", err);
     }
   };
 
   useEffect(() => {
+    // Initial load
     fetchISS();
     fetchAstronauts();
+
+    // Poll ISS every 15 seconds; cleanup on unmount
     const interval = setInterval(fetchISS, 15000);
     return () => clearInterval(interval);
   }, []);
 
-  return { issData, positions, speed, speedHistory, astronauts, loading, error, refresh: fetchISS };
+  return {
+    issData,
+    positions,
+    speed,
+    speedHistory,
+    astronauts,
+    loading,
+    error,
+    refresh: fetchISS,
+  };
 };

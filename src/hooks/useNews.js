@@ -24,9 +24,9 @@ export const useNews = () => {
         }
       }
 
-      const res = await axios.get(
-        `https://gnews.io/api/v4/top-headlines?lang=en&max=10&token=${import.meta.env.VITE_NEWS_API_KEY}`
-      );
+      // Prefix with corsproxy.io so GNews works in Vercel production (no CORS block)
+      const gnewsUrl = `https://gnews.io/api/v4/top-headlines?lang=en&max=10&token=${import.meta.env.VITE_NEWS_API_KEY}`;
+      const res = await axios.get(`https://corsproxy.io/?${gnewsUrl}`);
       const data = res.data.articles || [];
       localStorage.setItem(CACHE_KEY, JSON.stringify({ data, timestamp: Date.now() }));
       setArticles(data);
